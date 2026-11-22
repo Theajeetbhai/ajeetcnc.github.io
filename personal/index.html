@@ -616,6 +616,61 @@
         .work-row, .link-card, .fav, .btn-solid, .btn-ghost, .btn-talk, .btn-edit, .btn-mini, .chat-fab, .chat-chip, .chat-send, .chat-close, .nav{ transition:none; }
       }
     </style>
+  
+    <style>
+      /* ===== Premium motion upgrade — hand-built in the Aceternity / Skiper
+         style (no library code). Transform/opacity only, so scrolling stays
+         butter-smooth on a mid-range phone. ===== */
+
+      /* Scroll progress — thin gold line across the very top (scaleX by JS). */
+      .progress{
+        position:fixed; top:0; left:0; right:0; height:3px; z-index:150; pointer-events:none;
+        background:linear-gradient(90deg, var(--gold-2), var(--gold), #a87f22);
+        transform-origin:0 50%; transform:scaleX(0);
+      }
+
+      /* Headline sheen — light slowly drifts through the gold hero line. */
+      @keyframes sheen{
+        0%{ background-position:50% 0%; }
+        50%{ background-position:50% 100%; }
+        100%{ background-position:50% 0%; }
+      }
+      .hero h1 .grad-gold{ background-size:100% 220%; animation:sheen 7s ease-in-out infinite; }
+      body.tab-hidden .hero h1 .grad-gold{ animation-play-state:paused; }
+
+      /* Spotlight cards — a soft gold glow follows the pointer (--mx/--my set
+         by JS). The .glass gradient is repeated as the second layer, so the
+         frosted look is unchanged; the glow simply paints above it. */
+      .work-row, .stat, .skill, .link-card{
+        background-image:
+          radial-gradient(280px circle at var(--mx, 50%) var(--my, 50%), rgba(212,175,55,.13), rgba(212,175,55,0) 65%),
+          linear-gradient(155deg, rgba(255,255,255,.10), rgba(255,255,255,.035) 55%, rgba(255,255,255,.06));
+      }
+
+      /* Marquee — an infinite, slow strip under the hero. Words are the site's
+         own; the track is duplicated once for a seamless loop. */
+      .marquee{
+        overflow:hidden; padding:20px 0;
+        border-top:1px solid var(--line-soft); border-bottom:1px solid var(--line-soft);
+        -webkit-mask-image:linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+        mask-image:linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+      }
+      .marquee-track{ display:flex; width:max-content; animation:marquee 36s linear infinite; }
+      body.tab-hidden .marquee-track{ animation-play-state:paused; }
+      @keyframes marquee{ from{ transform:translateX(0); } to{ transform:translateX(-50%); } }
+      .mq-group{ display:flex; flex:none; }
+      .mq-group span{
+        display:flex; align-items:center; white-space:nowrap;
+        font-family:var(--display); font-size:19px; letter-spacing:.32em; color:var(--cream-faint);
+        padding:0 26px;
+      }
+      .mq-group span b{ margin-left:52px; font-weight:400; font-size:13px; color:var(--gold); }
+
+      @media (prefers-reduced-motion: reduce){
+        .marquee-track, .hero h1 .grad-gold{ animation:none; }
+        .progress{ display:none; }
+      }
+    </style>
   </head>
   <body>
     <script>
@@ -628,6 +683,7 @@
     <div class="grain" aria-hidden="true"></div>
     <div class="cursor-dot" aria-hidden="true"></div>
     <div class="cursor-ring" aria-hidden="true"></div>
+    <div class="progress" aria-hidden="true"></div>
 
     <header class="nav glass" id="nav">
       <a class="brand" href="#top" aria-label="Ajeet — home">AJEET<em>.</em></a>
@@ -670,6 +726,14 @@
           <div class="signature">Ajeet</div>
         </div>
       </section>
+
+      <!-- ============ MARQUEE ============ -->
+      <div class="marquee" aria-hidden="true">
+        <div class="marquee-track">
+          <div class="mq-group"><span>HAR ROZ 4K WALLPAPERS<b>&#10022;</b></span><span>ATTENDPRO<b>&#10022;</b></span><span>CNC MACHINIST<b>&#10022;</b></span><span>AJEET OS<b>&#10022;</b></span><span>WEB GAMES<b>&#10022;</b></span><span>CONTENT CREATOR<b>&#10022;</b></span><span>DIL SE BANAYA<b>&#10022;</b></span></div>
+          <div class="mq-group"><span>HAR ROZ 4K WALLPAPERS<b>&#10022;</b></span><span>ATTENDPRO<b>&#10022;</b></span><span>CNC MACHINIST<b>&#10022;</b></span><span>AJEET OS<b>&#10022;</b></span><span>WEB GAMES<b>&#10022;</b></span><span>CONTENT CREATOR<b>&#10022;</b></span><span>DIL SE BANAYA<b>&#10022;</b></span></div>
+        </div>
+      </div>
 
       <!-- ============ ABOUT ============ -->
       <section class="about" id="about">
@@ -1398,6 +1462,124 @@
           input.value = '';
           ask(text);
         });
+      })();
+    </script>
+  
+    <script>
+      /* Premium motion upgrade — spotlight, tilt, magnetic CTAs, hero
+         parallax, scroll progress and skill counters. Everything is
+         rAF-throttled, transform/opacity only, and off for reduced motion
+         or touch-only devices where it does not belong. */
+      (function () {
+        var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        var fine = window.matchMedia('(pointer: fine)').matches;
+
+        /* --- scroll progress + gentle hero parallax (one handler) --- */
+        var bar = document.querySelector('.progress');
+        var hero = document.querySelector('.hero');
+        var heroInner = document.querySelector('.hero-inner');
+        var ticking = false;
+        function onScroll() {
+          if (ticking) return; ticking = true;
+          requestAnimationFrame(function () {
+            ticking = false;
+            var y = window.scrollY || 0;
+            if (bar) {
+              var h = document.documentElement.scrollHeight - window.innerHeight;
+              bar.style.transform = 'scaleX(' + (h > 0 ? Math.min(y / h, 1) : 0) + ')';
+            }
+            if (heroInner && hero && !reduced) {
+              var hh = hero.offsetHeight;
+              if (y < hh) {
+                heroInner.style.transform = 'translate3d(0,' + (-y * 0.08).toFixed(1) + 'px,0)';
+                heroInner.style.opacity = String(Math.max(1 - y / (hh * 1.6), 0.25));
+              } else {
+                heroInner.style.transform = '';
+                heroInner.style.opacity = '';
+              }
+            }
+          });
+        }
+        if (bar || heroInner) {
+          window.addEventListener('scroll', onScroll, { passive: true });
+          onScroll();
+        }
+
+        if (fine && !reduced) {
+          /* --- spotlight glow + gentle 3D tilt, one delegated pointermove --- */
+          var spotSel = '.work-row, .stat, .skill, .link-card';
+          var tiltSel = '.work-row, .link-card';
+          var cur = null, tiltEl = null, px = 0, py = 0, raf = null;
+          function resetTilt() {
+            if (!tiltEl) return;
+            tiltEl.style.transition = '';
+            tiltEl.style.transform = '';
+            tiltEl = null;
+          }
+          function apply() {
+            raf = null;
+            if (!cur) { resetTilt(); return; }
+            var r = cur.getBoundingClientRect();
+            if (r.width > 0) {
+              cur.style.setProperty('--mx', ((px - r.left) / r.width * 100).toFixed(1) + '%');
+              cur.style.setProperty('--my', ((py - r.top) / r.height * 100).toFixed(1) + '%');
+            }
+            if (cur.matches(tiltSel)) {
+              if (tiltEl && tiltEl !== cur) resetTilt();
+              tiltEl = cur;
+              var dx = (px - r.left) / r.width - 0.5;
+              var dy = (py - r.top) / r.height - 0.5;
+              cur.style.transition = 'transform .12s ease-out';
+              cur.style.transform = 'perspective(900px) rotateX(' + (-dy * 3.2).toFixed(2) + 'deg) rotateY(' + (dx * 3.2).toFixed(2) + 'deg) translateY(-4px)';
+            } else {
+              resetTilt();
+            }
+          }
+          document.addEventListener('pointermove', function (e) {
+            var el = e.target && e.target.closest ? e.target.closest(spotSel) : null;
+            cur = el; px = e.clientX; py = e.clientY;
+            if (!raf) raf = requestAnimationFrame(apply);
+          }, { passive: true });
+          document.addEventListener('pointerleave', function () { cur = null; if (!raf) raf = requestAnimationFrame(apply); });
+
+          /* --- magnetic pull on the main CTAs --- */
+          document.querySelectorAll('.btn-solid, .btn-talk').forEach(function (btn) {
+            btn.addEventListener('pointermove', function (e) {
+              var r = btn.getBoundingClientRect();
+              var x = e.clientX - r.left - r.width / 2;
+              var y = e.clientY - r.top - r.height / 2;
+              btn.style.transform = 'translate(' + (x * 0.18).toFixed(1) + 'px,' + (y * 0.28).toFixed(1) + 'px) scale(1.04)';
+            });
+            btn.addEventListener('pointerleave', function () { btn.style.transform = ''; });
+          });
+        }
+
+        /* --- skill percentages count up as the bars fill --- */
+        var grid = document.getElementById('skillsGrid');
+        if (grid && !reduced && 'IntersectionObserver' in window) {
+          var counted = false;
+          var cio = new IntersectionObserver(function (entries) {
+            entries.forEach(function (en) {
+              if (!en.isIntersecting || counted) return;
+              counted = true; cio.disconnect();
+              grid.querySelectorAll('.skill').forEach(function (sk) {
+                var pctEl = sk.querySelector('.skill-pct');
+                if (!pctEl) return;
+                var target = parseInt(pctEl.textContent, 10);
+                if (isNaN(target)) return;
+                var t0 = null;
+                function step(ts) {
+                  if (!t0) t0 = ts;
+                  var pr = Math.min((ts - t0) / 1100, 1);
+                  pctEl.textContent = String(Math.round(target * (1 - Math.pow(1 - pr, 3))));
+                  if (pr < 1) requestAnimationFrame(step);
+                }
+                requestAnimationFrame(step);
+              });
+            });
+          }, { threshold: 0.3 });
+          cio.observe(grid);
+        }
       })();
     </script>
   </body>
