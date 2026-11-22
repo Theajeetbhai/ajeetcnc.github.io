@@ -302,6 +302,8 @@
       var day = S.att.company[dk]; return day ? (day[code]||null) : null;
     }
     function setRec(scope, dk, code, rec){
+      /* isolation (data layer): in company scope an employee may write ONLY his own record */
+      if(scope!=="personal" && !isAdmin() && code!==S.settings.myEmpId) return;
       if(scope==="personal"){ if(rec) S.att.personal[dk]=rec; else delete S.att.personal[dk]; }
       else {
         if(!S.att.company[dk]) S.att.company[dk]={};
@@ -368,7 +370,18 @@
     function esc(s){ return String(s===null||s===undefined?"":s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
     function empByCode(code){ for(var i=0;i<S.employees.length;i++) if(S.employees[i].code===code) return S.employees[i]; return null; }
     function isAdmin(){ return S.settings.role==="admin"; }
-    function canEdit(){ return isAdmin() || UI.markDate===todayKey(); }
+    function canEdit(){ return isAdmin() || !!ownEmp(); }
+    /* the employee record the logged-in employee owns (null for admin / not selected) */
+    function ownEmp(){ if(isAdmin()) return null; return S.settings.myEmpId ? empByCode(S.settings.myEmpId) : null; }
+    /* employee backup: ONLY his own data — never other employees, never the admin PIN */
+    function myBackup(){
+      var out=JSON.parse(JSON.stringify(S)), code=S.settings.myEmpId, comp={};
+      out.settings.pin="";
+      out.employees = code ? S.employees.filter(function(e){ return e.code===code; }) : [];
+      Object.keys(S.att.company).forEach(function(dk){ var day=S.att.company[dk]; if(code && day[code]){ comp[dk]={}; comp[dk][code]=day[code]; } });
+      out.att={ company:comp, personal:S.att.personal };
+      return out;
+    }
 
     /* ================= toast / modal ================= */
     var toastTimer=null;
@@ -412,7 +425,7 @@
       var pinSet = !!S.settings.pin;
       openModal(
         '<h3>SWITCH ROLE</h3>'+
-        '<p class="muted small">Admin can edit everything. Employee can view data and mark only their own attendance for today.</p>'+
+        '<p class="muted small">Admin can edit everything. Employee can view and edit ONLY their own attendance and details — on any date.</p>'+
         '<div class="fgrid">'+
         '<div><label>Role</label><select id="mRole" style="width:100%">'+
           '<option value="employee"'+(isAdmin()?"":" selected")+'>Employee</option>'+
@@ -445,7 +458,7 @@
           '<div style="text-align:left;margin-top:1rem"><label>Admin PIN</label>'+
           '<input id="lockPin" type="password" inputmode="numeric" placeholder="••••" style="width:100%;text-align:center;font-size:1.3rem;letter-spacing:.4em"></div>'+
           '<button class="btn green" id="lockGo" type="button" style="width:100%;margin-top:1rem">UNLOCK</button>'+
-          '<button class="btn ghost" id="lockEmp" type="button" style="width:100%;margin-top:.5rem">Continue as Employee (view + mark today)</button>'+
+          '<button class="btn ghost" id="lockEmp" type="button" style="width:100%;margin-top:.5rem">Continue as Employee (only my own data)</button>'+
         '</div></div>';
         document.getElementById("lockGo").addEventListener("click", tryUnlock);
         document.getElementById("lockPin").addEventListener("keydown", function(e){ if(e.key==="Enter") tryUnlock(); });
@@ -507,6 +520,27 @@
     function viewDashboard(){
       var set=S.settings, y=UI.repY, m=UI.repM, tk=todayKey(), h="";
       if(set.mode==="company"){
+        if(!isAdmin()){
+          /* employee dashboard: ONLY his own data */
+          var me=ownEmp();
+          if(!me){ h += '<div class="empty">Employee role — select yourself in the <b>Attendance</b> tab first. You will see and edit only your own data.</div>'; return h; }
+          var ms=monthStats("company", me.code, y, m), tcMe=recCalc(getRec("company", tk, me.code)), salMe=salaryEstimate(+me.salary||0, ms, y, m);
+          h += '<div class="hero"><div class="cap">My Total Hours · '+monthName(m)+' '+y+'</div>'+
+               '<div class="big">'+dec(ms.work)+'<small> HRS</small></div>'+
+               '<div class="sub">'+esc(me.name)+' · '+esc(me.code)+' · Year total '+hrs(yearStats("company", me.code, y).work)+'</div></div>';
+          h += '<div class="grid">'+
+            statCard("Today", dec(tcMe.work)+"<small> HRS</small>", prettyDate(tk), "c-cyan")+
+            statCard("Present Days", ms.P, monthName(m)+" "+y, "c-green")+
+            statCard("Absent Days", ms.A, monthName(m)+" "+y, "c-red")+
+            statCard("Total Monthly Hours", dec(ms.work)+"<small> HRS</small>", monthName(m)+" "+y)+
+            statCard("Total Overtime Hours", dec(ms.ot)+"<small> HRS</small>", monthName(m)+" "+y, "c-amber")+
+            statCard("Total Absent Hours", dec(ms.absent)+"<small> HRS</small>", monthName(m)+" "+y, "c-purple")+
+            statCard("Attendance %", ms.pct+"<small> %</small>", monthName(m)+" "+y, "c-green")+
+            statCard("Est. Salary", money(salMe.est), monthName(m)+" "+y)+
+          '</div>';
+          h += '<p class="muted small">Employee role: you see and edit only your own data.</p>';
+          return h;
+        }
         var t={P:0,A:0,H:0,WO:0,L:0,work:0,ot:0,absent:0,marked:0}, todayWork=0, todayOt=0;
         var perEmp=[];
         S.employees.forEach(function(e){
@@ -582,7 +616,8 @@
       if(UI.openEd==="me" && !dis) h+=hoursEditorInPlace("personal", dk, "me", rec);
       return h+'</div>';
     }
-    function canEditFor(dk){ return isAdmin() || dk===todayKey(); }
+    /* who may edit a record: admin → anyone in this company; employee → ONLY his own record (any date); personal → own data */
+    function canEditFor(dk, code){ if(isAdmin()) return true; if(code) return code===S.settings.myEmpId; return true; }
     /* editor needs inputs scoped to its row; wrap with data attrs via container */
     function hoursEditorInPlace(scope, dk, code, rec){
       return '<div class="edwrap" data-scope="'+scope+'" data-date="'+dk+'" data-code="'+esc(code)+'">'+hoursEditor(scope, dk, code, rec)+'</div>';
@@ -592,12 +627,12 @@
     function viewMark(){
       var dk=UI.markDate, set=S.settings, h="";
       h += '<div class="datebar"><div><label>Date</label><input type="date" id="markDate" value="'+dk+'"></div>'+
-           '<div class="muted" style="padding-bottom:.4rem;font-weight:600">'+prettyDate(dk)+(dk===todayKey()?" · Today":"")+(isAdmin()?"":" · Employee role: only today can be marked")+'</div></div>';
+           '<div class="muted" style="padding-bottom:.4rem;font-weight:600">'+prettyDate(dk)+(dk===todayKey()?" · Today":"")+(isAdmin()?"":" · Employee role: only your own data")+'</div></div>';
       if(set.mode==="personal"){
         h += personalDayCard(dk, getRec("personal", dk, null), dk===todayKey());
         h += '<h2 class="sec">History · '+monthName(UI.repM)+' '+UI.repY+'</h2>'+ personalHistory();
       } else {
-        if(!isAdmin() && !S.settings.myEmpId){
+        if(!isAdmin() && !ownEmp()){
           h += '<div class="panel" style="margin-bottom:.8rem"><label>Employee role — select yourself</label>'+
                '<div class="rowflex"><select id="selfPick" class="grow"><option value="">— Select your name —</option>'+
                S.employees.map(function(e){ return '<option value="'+esc(e.code)+'">'+esc(e.name)+' ('+esc(e.code)+')</option>'; }).join("")+
@@ -605,8 +640,8 @@
         }
         if(!S.employees.length) h += '<div class="empty">No employees yet. Add employees from the <b>Employees</b> tab first.</div>';
         S.employees.forEach(function(e){
-          if(!isAdmin() && S.settings.myEmpId && e.code!==S.settings.myEmpId) return;
-          var rec=getRec("company", dk, e.code), c=recCalc(rec), dis=!canEditFor(dk);
+          if(!isAdmin() && e.code!==S.settings.myEmpId) return;
+          var rec=getRec("company", dk, e.code), c=recCalc(rec), dis=!canEditFor(dk, e.code);
           h += '<div class="arow"><div class="head"><div class="avatar">'+esc(initials(e.name))+'</div><div>'+
                '<div class="nm">'+esc(e.name)+'</div><div class="meta">'+esc(e.code)+(e.dept?' · '+esc(e.dept):"")+(rec?' · '+statusLabel(rec.status):' · Not marked')+'</div></div>'+
                '<div class="hrs"><div class="lcd">'+hrs(c.work)+'</div>'+(c.ot?'<div class="ot">OT '+hrs(c.ot)+'</div>':"")+(c.absent?'<div class="ot" style="color:var(--red)">ABSENT '+hrs(c.absent)+'</div>':"")+'</div></div>'+
@@ -637,23 +672,25 @@
     function viewEmployees(){
       var h="", admin=isAdmin();
       h += '<div class="datebar"><div class="grow"><label>Search employees</label><input type="search" id="empSearch" placeholder="Name, ID, department…" value="'+esc(UI.search)+'" style="width:100%"></div>'+
-           (admin? '<button type="button" class="btn green" id="addEmpBtn">+ Add Employee</button>' : '<div class="muted small" style="padding-bottom:.4rem">Employee role: view only</div>')+'</div>';
-      if(admin && (UI.showEmpForm || UI.editEmp)){
+           (admin? '<button type="button" class="btn green" id="addEmpBtn">+ Add Employee</button>' : '<div class="muted small" style="padding-bottom:.4rem">Employee role: only your own details</div>')+'</div>';
+      if((admin && (UI.showEmpForm || UI.editEmp)) || (!admin && UI.editEmp && UI.editEmp===S.settings.myEmpId)){
         var e = UI.editEmp ? empByCode(UI.editEmp) : null;
-        h += '<div class="panel" style="margin-bottom:.9rem"><h2 class="sec" style="margin-top:0">'+(e?"Edit Employee":"New Employee")+'</h2>'+
+        h += '<div class="panel" style="margin-bottom:.9rem"><h2 class="sec" style="margin-top:0">'+(e?(admin?"Edit Employee":"Edit My Details"):"New Employee")+'</h2>'+
           '<div class="fgrid">'+
           '<div><label>Employee ID *</label><input id="fCode" style="width:100%" value="'+esc(e?e.code:"")+'" '+(e?"disabled":"")+' placeholder="EMP001"></div>'+
           '<div><label>Full Name *</label><input id="fName" style="width:100%" value="'+esc(e?e.name:"")+'" placeholder="Full name"></div>'+
           '<div><label>Department</label><input id="fDept" style="width:100%" value="'+esc(e?e.dept:"")+'" placeholder="Production"></div>'+
           '<div><label>Designation</label><input id="fDesig" style="width:100%" value="'+esc(e?e.desig:"")+'" placeholder="Operator"></div>'+
-          '<div><label>Joining Date</label><input id="fJoin" type="date" style="width:100%" value="'+esc(e?e.joining:"")+'"></div>'+
-          '<div><label>Monthly Salary (₹)</label><input id="fSalary" type="number" min="0" step="any" style="width:100%" value="'+(e?e.salary:"")+'" placeholder="25000"></div>'+
-          '</div><div class="rowflex" style="margin-top:.9rem"><button type="button" class="btn green" id="empSave">'+(e?"Save Changes":"Add Employee")+'</button>'+
+          (admin? '<div><label>Joining Date</label><input id="fJoin" type="date" style="width:100%" value="'+esc(e?e.joining:"")+'"></div>'+
+          '<div><label>Monthly Salary (₹)</label><input id="fSalary" type="number" min="0" step="any" style="width:100%" value="'+(e?e.salary:"")+'" placeholder="25000"></div>' : '')+
+          '</div>'+(admin? '' : '<p class="muted small" style="margin:.5rem 0 0">You can edit only your own name, department and designation. Salary and joining date are set by Admin.</p>')+
+          '<div class="rowflex" style="margin-top:.9rem"><button type="button" class="btn green" id="empSave">'+(e?"Save Changes":"Add Employee")+'</button>'+
           '<button type="button" class="btn ghost" id="empCancel">Cancel</button></div></div>';
       }
       var q=UI.search.trim().toLowerCase();
-      var list=S.employees.filter(function(e){ return !q || (e.name+" "+e.code+" "+(e.dept||"")+" "+(e.desig||"")).toLowerCase().indexOf(q)>=0; });
+      var list=S.employees.filter(function(e){ if(!admin && e.code!==S.settings.myEmpId) return false; return !q || (e.name+" "+e.code+" "+(e.dept||"")+" "+(e.desig||"")).toLowerCase().indexOf(q)>=0; });
       if(!S.employees.length) h += '<div class="empty">No employees yet. Tap <b>+ Add Employee</b> to add your team.</div>';
+      else if(!admin && !ownEmp()) h += '<div class="empty">Employee role — select yourself in the <b>Attendance</b> tab first. You will see and edit only your own details here.</div>';
       else if(!list.length) h += '<div class="empty">No employees match “'+esc(UI.search)+'”.</div>';
       list.forEach(function(e){
         var s=monthStats("company", e.code, UI.repY, UI.repM);
@@ -661,7 +698,7 @@
              '<div class="nm" style="font-weight:700;font-size:1.05rem">'+esc(e.name)+' <span class="muted small">'+esc(e.code)+'</span></div>'+
              '<div class="meta muted small" style="font-weight:600">'+esc(e.dept||"—")+(e.desig?' · '+esc(e.desig):"")+(e.joining?' · Joined '+prettyDate(e.joining):"")+' · Salary '+money(e.salary||0)+'/mo</div>'+
              '<div class="small" style="font-weight:600">'+monthName(UI.repM)+' '+UI.repY+': <span style="color:var(--lcd)">'+dec(s.work)+' HRS</span> · '+s.P+' present · '+s.pct+'%</div></div>'+
-             (admin? '<button type="button" class="btn sm" data-act="editEmp" data-code="'+esc(e.code)+'">Edit</button><button type="button" class="btn sm red" data-act="delEmp" data-code="'+esc(e.code)+'">Delete</button>' : "")+
+             (admin? '<button type="button" class="btn sm" data-act="editEmp" data-code="'+esc(e.code)+'">Edit</button><button type="button" class="btn sm red" data-act="delEmp" data-code="'+esc(e.code)+'">Delete</button>' : '<button type="button" class="btn sm" data-act="editEmp" data-code="'+esc(e.code)+'">Edit My Details</button>')+
              '</div>';
       });
       return h;
@@ -682,6 +719,10 @@
         if(set.mode==="personal"){
           var rec=getRec("personal", dk, null);
           if(rec){ var c=recCalc(rec); dots='<span class="dots"><i style="background:'+SCOLOR[rec.status]+'"></i></span>'; inner+='<div class="h">'+dec(c.work)+' HRS</div>'+dots; }
+        } else if(!isAdmin()){
+          /* employee calendar: ONLY his own record */
+          var myRec=S.settings.myEmpId ? getRec("company", dk, S.settings.myEmpId) : null;
+          if(myRec){ var mc=recCalc(myRec); dots='<span class="dots"><i style="background:'+SCOLOR[myRec.status]+'"></i></span>'; inner+='<div class="h">'+dec(mc.work)+' HRS</div>'+dots; }
         } else {
           var day=S.att.company[dk]||{}, codes=Object.keys(day), tw=0, seen={};
           codes.forEach(function(code){ var r=day[code]; tw+=recCalc(r).work; if(!seen[r.status]){ seen[r.status]=1; dots+='<i style="background:'+SCOLOR[r.status]+'"></i>'; } });
@@ -697,7 +738,12 @@
 
     /* ================= REPORTS ================= */
     function reportRows(y, m){
-      return S.employees.map(function(e){ return { e:e, s:monthStats("company", e.code, y, m) }; });
+      /* employee reports: ONLY his own row */
+      var list = isAdmin() ? S.employees : S.employees.filter(function(e){ return e.code===S.settings.myEmpId; });
+      return list.map(function(e){ return { e:e, s:monthStats("company", e.code, y, m) }; });
+    }
+    function scopedEmployees(){
+      return isAdmin() ? S.employees : S.employees.filter(function(e){ return e.code===S.settings.myEmpId; });
     }
     function viewReports(){
       var y=UI.repY, m=UI.repM, set=S.settings, h="";
@@ -729,7 +775,7 @@
         var rows=reportRows(y,m);
         var T={P:0,A:0,H:0,WO:0,L:0,work:0,ot:0,absent:0};
         h += '<h2 class="sec">Monthly Report · '+monthName(m)+' '+y+'</h2>';
-        if(!rows.length) h += '<div class="empty">No employees yet — nothing to report.</div>';
+        if(!rows.length) h += '<div class="empty">'+(isAdmin() ? 'No employees yet — nothing to report.' : 'Select yourself in the Attendance tab first — your report shows only your own data.')+'</div>';
         else {
           h += '<div class="tblwrap"><table><thead><tr><th>Employee</th><th>ID</th><th class="num">Present</th><th class="num">Absent</th><th class="num">Half</th><th class="num">Leave</th><th class="num">WO</th><th class="num">Day Hrs (today)</th><th class="num">Month Hours</th><th class="num">Overtime</th><th class="num">Absent Hrs</th><th class="num">Att %</th></tr></thead><tbody>';
           rows.forEach(function(r){
@@ -761,7 +807,7 @@
         '<button type="button" class="btn" id="expHours">Employee Hours CSV</button>'+
         '<button type="button" class="btn" id="expOT">Overtime Report CSV</button>'+
         '<button type="button" class="btn green" id="expPrint">Print / PDF View</button>'+
-        '</div><p class="muted small" style="margin:.6rem 0 0">CSV files open in Excel / Google Sheets. Print view opens a clean sheet — use your browser’s Print → Save as PDF.</p></div>';
+        '</div><p class="muted small" style="margin:.6rem 0 0">CSV files open in Excel / Google Sheets. Print view opens a clean sheet — use your browser’s Print → Save as PDF.'+(isAdmin() ? '' : ' Employee role: exports include ONLY your own data.')+'</p></div>';
       return h;
     }
 
@@ -769,8 +815,13 @@
     function viewSettings(){
       var set=S.settings, h="";
       if(!isAdmin()){
-        return '<div class="empty">Settings are available to <b>Admin</b> only. Use the role button at the top to switch'+(set.pin?" (PIN required).":".")+'</div>'+
-               '<h2 class="sec">Backup</h2><div class="panel"><div class="rowflex"><button type="button" class="btn" id="backupBtn">Download Backup (JSON)</button></div></div>';
+        /* employee settings: own profile + own-data backup only (rules, restore and erase stay Admin-only) */
+        return '<h2 class="sec">My Profile</h2><div class="panel"><div class="fgrid">'+
+               '<div><label>Display Name (Personal mode)</label><input id="sPName" style="width:100%" value="'+esc(set.personalName)+'"></div>'+
+               '<div><label>My Monthly Salary (₹)</label><input id="sPSalary" type="number" min="0" step="any" style="width:100%" value="'+(set.personalSalary||"")+'"></div>'+
+               '</div><div class="rowflex" style="margin-top:.8rem"><button type="button" class="btn green" id="saveProfile">Save Profile</button></div>'+
+               '<p class="muted small" style="margin:.6rem 0 0">Your company details (name, department, designation) can be edited from the <b>Employees</b> tab — only your own. Working rules and company settings are Admin only.</p></div>'+
+               '<h2 class="sec">My Backup</h2><div class="panel"><p class="muted small" style="margin-top:0">Downloads ONLY your own data — your details, your attendance and your personal records. Restore is Admin only.</p><div class="rowflex"><button type="button" class="btn" id="backupBtn">Download My Backup (JSON)</button></div></div>';
       }
       h += '<h2 class="sec">Working Rules</h2><div class="panel">'+
         '<div class="fgrid">'+
@@ -830,7 +881,7 @@
       var dk=UI.repDate, rows=[["Date","Employee Name","Employee ID","Status","In Time","Out Time","Break (min)","Day Hours","Overtime Hours","Absent Hours"]];
       if(S.settings.mode==="personal"){
         var rec=getRec("personal", dk, null); if(rec){ var c=recCalc(rec); rows.push([dk, S.settings.personalName, "ME", statusLabel(rec.status), rec.inT||"", rec.outT||"", rec.breakMin||0, dec(c.work), dec(c.ot), dec(c.absent)]); }
-      } else S.employees.forEach(function(e){
+      } else scopedEmployees().forEach(function(e){
         var rec=getRec("company", dk, e.code); if(rec){ var c=recCalc(rec); rows.push([dk, e.name, e.code, statusLabel(rec.status), rec.inT||"", rec.outT||"", rec.breakMin||0, dec(c.work), dec(c.ot), dec(c.absent)]); }
       });
       if(rows.length===1){ toast("No records on "+prettyDate(dk)+"."); return; }
@@ -839,7 +890,7 @@
     }
     function exportHours(){
       var y=UI.repY, rows=[["Employee Name","Employee ID","Month","Hours"]];
-      var codes = S.settings.mode==="personal" ? [null] : S.employees.map(function(e){ return e.code; });
+      var codes = S.settings.mode==="personal" ? [null] : scopedEmployees().map(function(e){ return e.code; });
       codes.forEach(function(code){
         var nm = code? (empByCode(code)||{}).name : S.settings.personalName;
         for(var m=0;m<12;m++){ var s=monthStats(S.settings.mode, code, y, m); if(s.marked) rows.push([nm, code||"ME", monthName(m)+" "+y, dec(s.work)]); }
@@ -849,7 +900,7 @@
     }
     function exportOT(){
       var y=UI.repY, m=UI.repM, dim=daysInMonth(y,m), rows=[["Date","Employee Name","Employee ID","Worked Hours","Overtime Hours"]];
-      var codes = S.settings.mode==="personal" ? [null] : S.employees.map(function(e){ return e.code; });
+      var codes = S.settings.mode==="personal" ? [null] : scopedEmployees().map(function(e){ return e.code; });
       codes.forEach(function(code){
         var nm = code? (empByCode(code)||{}).name : S.settings.personalName;
         for(var d=1; d<=dim; d++){ var dk=y+"-"+pad(m+1)+"-"+pad(d); var c=recCalc(getRec(S.settings.mode, dk, code)); if(c.ot>0) rows.push([dk, nm, code||"ME", dec(c.work), dec(c.ot)]); }
@@ -892,6 +943,10 @@
       var el=e.target.closest("[data-act]"); if(!el) return;
       var act=el.getAttribute("data-act"), scope=el.getAttribute("data-scope"), dk=el.getAttribute("data-date"), code=el.getAttribute("data-code");
       var realCode = scope==="personal" ? null : code;
+      /* isolation guard: an employee's actions can touch ONLY his own company record */
+      if(scope==="company" && !isAdmin() && realCode!==S.settings.myEmpId){ toast("You can edit only your own data."); return; }
+      if(act==="delEmp" && !isAdmin()){ toast("Only Admin can delete employees."); return; }
+      if(act==="editEmp" && !isAdmin() && code!==S.settings.myEmpId){ toast("You can edit only your own details."); return; }
 
       if(act==="tick"){
         if(el.disabled) return;
@@ -959,6 +1014,13 @@
       if(id==="empSave"){
         var code=(document.getElementById("fCode").value||"").trim(), name=(document.getElementById("fName").value||"").trim();
         if(!code || !name){ toast("Employee ID and Name are required."); return; }
+        if(!isAdmin()){
+          /* employee self-edit: ONLY his own record, ONLY basic details */
+          if(!UI.editEmp || UI.editEmp!==S.settings.myEmpId || code!==S.settings.myEmpId){ toast("You can edit only your own details."); return; }
+          var me2=empByCode(UI.editEmp);
+          if(me2){ me2.name=name; me2.dept=(document.getElementById("fDept").value||"").trim(); me2.desig=(document.getElementById("fDesig").value||"").trim(); }
+          UI.showEmpForm=false; UI.editEmp=null; save(); toast("Your details updated."); render(); return;
+        }
         var data={ code:code, name:name,
           dept:(document.getElementById("fDept").value||"").trim(), desig:(document.getElementById("fDesig").value||"").trim(),
           joining:document.getElementById("fJoin").value||"", salary:Math.max(0, +document.getElementById("fSalary").value||0) };
@@ -998,7 +1060,8 @@
       }
       if(id==="clearPin"){ S.settings.pin=""; save(); toast("PIN removed."); render(); }
       if(id==="backupBtn"){
-        download("attendpro-backup-"+todayKey()+".json", JSON.stringify(S, null, 2), "application/json");
+        /* employee backup contains ONLY his own data — never the whole company or the admin PIN */
+        download("attendpro-backup-"+todayKey()+".json", JSON.stringify(isAdmin()? S : myBackup(), null, 2), "application/json");
         toast("Backup downloaded.");
       }
       if(id==="restoreBtn"){ document.getElementById("restoreFile").click(); }
