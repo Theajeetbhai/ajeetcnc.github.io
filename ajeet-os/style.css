@@ -484,3 +484,23 @@ input[type=range]{accent-color:var(--accent)}
 .sr-ico .app-emoji{font-size:15px;vertical-align:-2px}
 .store-head{margin:14px 0 8px;font-size:.95rem}
 .app-body > .store-head:first-child{margin-top:2px}
+
+/* ---------- Premium polish (2026-11-23) — light micro-interactions in the
+   Aceternity / Skiper spirit, hand-written. Transform/opacity only, and all
+   motion sits behind hover + no-preference guards, so touch phones and
+   reduced-motion users see the exact same calm OS as before. ---------- */
+::selection{background:rgba(56,189,248,.35)}
+.app-body{scroll-behavior:smooth}
+.login-avatar{box-shadow:0 0 0 4px rgba(56,189,248,.25),0 0 34px rgba(56,189,248,.38),0 8px 22px rgba(0,0,0,.4)}
+@media (hover:hover) and (prefers-reduced-motion: no-preference){
+  .dicon{transition:background .15s ease,transform .15s ease,box-shadow .2s ease}
+  .dicon span{transition:transform .25s cubic-bezier(.34,1.56,.64,1)}
+  .dicon:hover{box-shadow:inset 0 0 0 1px rgba(125,211,252,.35),0 6px 18px rgba(2,8,24,.35)}
+  .dicon:hover span{transform:scale(1.18) translateY(-2px)}
+  .store-item:hover{transform:translateY(-2px)}
+  .sb-chip:hover{transform:translateY(-1px)}
+  .tb-ico{transition:transform .18s ease,background .18s ease}
+  .tb-ico:hover{transform:translateY(-2px)}
+  .widget{transition:transform .2s ease,box-shadow .2s ease}
+  .widget:hover{transform:translateY(-2px);box-shadow:0 14px 30px rgba(2,8,24,.40)}
+}
